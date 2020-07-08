@@ -88,7 +88,7 @@ public class DownloadFileHandler extends SimpleChannelInboundHandler<FullHttpReq
      */
     private File readDownloadFile(Map<String, Object> map) {
         //todo 自己的逻辑,从哪个路径读文件也好,还是别的方法也罢,我们这随便写一个
-        return new File("/Users/Rock-Ayl/Downloads/test.doc");
+        return new File("/Users/ayl/workspace/resource/电影-海底总动员2-2016.mp4");
     }
 
     /**

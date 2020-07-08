@@ -1,0 +1,6 @@
+1: 进入DownloadServer,修改自己想要监控的端口
+2: 进入DownloadFileHandler,找到todo的地方位置,改成自己想要下载的文件路径(别忘了自己的系统盘符)(推荐指定一个mp4文件)
+3: 调用DownloadServer的主方法
+4: 浏览器(推荐谷歌),调用eg如下:
+   下载文件: http://127.0.0.1:8888/download?type=download
+   浏览文件: http://127.0.0.1:8888/download?type=preview
