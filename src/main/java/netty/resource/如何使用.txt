@@ -1,0 +1,5 @@
+1: 进入ResourceServer,修改自己想要监控的端口
+2: 进入ResourceFileHandler,找到todo的地方位置,改成自己想要静态文件存储目录(别忘了自己的系统盘符)
+3: 调用ResourceServer的主方法
+4: 浏览器(推荐谷歌),调用eg如下:
+   浏览静态文件: http://127.0.0.1:8888/你的目录/你的文件

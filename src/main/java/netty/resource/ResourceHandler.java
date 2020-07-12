@@ -1,4 +1,4 @@
-package netty.download;
+package netty.resource;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -19,21 +19,18 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
-import static io.netty.handler.codec.http.HttpResponseStatus.NOT_FOUND;
-
 /**
- * created by Rock-Ayl on 2019-11-18
- * 下载处理器
+ * created by Rock-Ayl on 2019-11-26
+ * 静态资源处理器
  */
-public class DownloadFileHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
+public class ResourceHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
-    //下载资源文件流,(放在这里为了方便关闭)
-    private RandomAccessFile randomAccessFile;
-    //下载资源-国际文件最后修改时间格式
+    //静态资源-国际文件最后修改时间格式
     public static final SimpleDateFormat SDF_HTTP_DATE_FORMATTER = new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US);
 
     //服务器支持headers缓存
@@ -53,70 +50,49 @@ public class DownloadFileHandler extends SimpleChannelInboundHandler<FullHttpReq
     }
 
     /**
-     * 区分文件请求类型的枚举
+     * 处理静态文件资源
+     *
+     * @param ctx
+     * @param req
+     * @param uriPath
      */
-    public enum FileRequestType {
-
-        //预览文件
-        preview,
-        //下载文件
-        download;
-
-        //解析
-        public static FileRequestType parse(String value) {
+    public RandomAccessFile handleResource(ChannelHandlerContext ctx, HttpRequest req, String uriPath) {
+        //初始化文件流
+        RandomAccessFile randomAccessFile = null;
+        try {
             //判空
-            if (StringUtils.isNotEmpty(value)) {
-                //判空
-                for (FileRequestType fileRequestType : FileRequestType.values()) {
-                    //如果相同
-                    if (fileRequestType.toString().toLowerCase().equals(value.toLowerCase())) {
-                        //返回枚举
-                        return fileRequestType;
+            if (StringUtils.isNotEmpty(uriPath)) {
+                //解析文件名称
+                String fileBaseName = FilenameUtils.getBaseName(uriPath);
+                //解析文件后缀
+                String fileExt = FilenameUtils.getExtension(uriPath);
+                //解码并组装成静态文件path
+                String resourceFilePath = URLDecoder.decode(fileBaseName, "UTF-8") + "." + fileExt;
+                //获取服务器中的静态文件
+                File file = readResourceFile(resourceFilePath);
+                //如果是个文件
+                if (file.exists() && file.isFile()) {
+                    //如果静态文件没有改动,直接返回(让浏览器用缓存)
+                    if (isNotModified(req, file)) {
+                        //文件未被修改,浏览器可以延用缓存
+                        sendObject(ctx, HttpResponseStatus.NOT_MODIFIED, "Modified false.");
+                    } else {
+                        //获取文件流
+                        randomAccessFile = new RandomAccessFile(file, "r");
+                        //响应请求文件流
+                        sendFileStream(ctx, req, file, randomAccessFile);
                     }
+                } else {
+                    //不存在文件,响应失败
+                    sendObject(ctx, HttpResponseStatus.NOT_FOUND, "没有发现文件.");
                 }
             }
-            //缺省
-            return FileRequestType.preview;
-        }
-
-    }
-
-    /**
-     * 具体的业务实现,如何通过参数得到一个文件
-     *
-     * @return
-     */
-    private File readDownloadFile(Map<String, Object> map) {
-        //todo 自己的逻辑,从哪个路径读文件也好,还是别的方法也罢,我们这随便写一个
-        return new File("/Users/ayl/workspace/resource/电影-海底总动员2-2016.mp4");
-    }
-
-    /**
-     * 请求进入点,一个下载请求从这里进入
-     *
-     * @throws Exception
-     */
-    @Override
-    protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
-        //从get请求获取请求传参参数
-        Map<String, Object> map = getParamsFromGet(request);
-        //解析出该下载请求,是 在线预览 还是 直接下载文件(很重要)
-        FileRequestType fileRequestType = FileRequestType.parse((String) map.get("type"));
-        //从业务中读取文件
-        File file = readDownloadFile(map);
-        try {
-            //初始化文件流
-            this.randomAccessFile = new RandomAccessFile(file, "r");
-            //如果成功获取文件
-            if (file != null && file.exists() && file.isFile()) {
-                //响应成功,我们返回一个文件
-                sendFileStream(ctx, request, file, this.randomAccessFile, fileRequestType);
-            } else {
-                //响应失败
-                sendObject(ctx, NOT_FOUND, "下载请求失败,文件不存在或用户信息失效.");
-            }
-        } catch (Exception e) {
-            System.out.println("响应请求文件流失败:" + e);
+        } catch (IOException e) {
+            //错误日志
+            System.out.println("handleResource IOException:" + e);
+        } finally {
+            //返回文件流
+            return randomAccessFile;
         }
     }
 
@@ -152,12 +128,23 @@ public class DownloadFileHandler extends SimpleChannelInboundHandler<FullHttpReq
     }
 
     /**
-     * 响应并返回请求下载文件的文件流
+     * 读取服务器静态资源
+     *
+     * @param pathSuffix 资源路径后缀
+     * @return
+     */
+    public File readResourceFile(String pathSuffix) {
+        //todo 静态资源目录自己设置
+        return new File("/Users/ayl/workspace/resource/" + pathSuffix);
+    }
+
+    /**
+     * 响应并返回请求文件的文件流
      *
      * @param ctx
      * @throws IOException
      */
-    public static void sendFileStream(ChannelHandlerContext ctx, HttpRequest request, File file, RandomAccessFile randomAccessFile, FileRequestType fileRequestType) throws IOException {
+    public static void sendFileStream(ChannelHandlerContext ctx, HttpRequest request, File file, RandomAccessFile randomAccessFile) throws IOException {
         //文件名
         String fileName = file.getName();
         //获取文件后缀
@@ -202,24 +189,10 @@ public class DownloadFileHandler extends SimpleChannelInboundHandler<FullHttpReq
         String disposition;
         //指定缓存机制
         String cacheControl;
-        //根据文件请求类型设置headers
-        switch (fileRequestType) {
-            //只是下载
-            case download:
-                //所有下载都是流
-                contentType = "application/octet-stream; charset=utf-8";
-                //告诉浏览器是下载,任何文件都不会预览
-                disposition = "attachment";
-                break;
-            //只是预览
-            case preview:
-            default:
-                //按文件类别区分文件类型
-                contentType = parseHttpResponseContentType(fileName);
-                //告诉浏览器是预览,会按照文件类型酌情预览,如果不支持则默认下载
-                disposition = "inline";
-                break;
-        }
+        //按文件类别区分文件类型
+        contentType = parseHttpResponseContentType(fileName);
+        //告诉浏览器是预览,会按照文件类型酌情预览,如果不支持则默认下载
+        disposition = "inline";
         //根据文件后缀操作设置headers
         switch (fileExt) {
             case "html":
@@ -274,6 +247,40 @@ public class DownloadFileHandler extends SimpleChannelInboundHandler<FullHttpReq
         }
         //ctx响应并关闭(如果使用Chunked编码，最后则需要发送一个编码结束的看空消息体，进行标记，表示所有消息体已经成功发送完成)
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+    }
+
+    /**
+     * 检测静态文件是否没有修改过
+     * 1.修改过,浏览器就必须重新刷新文件
+     * 2.未修改过,浏览器延用缓存
+     *
+     * @param req  请求
+     * @param file 服务器文件
+     * @return
+     */
+    private boolean isNotModified(HttpRequest req, File file) {
+        //默认修改过
+        boolean notModified = false;
+        //获取请求给与的浏览器缓存的文件最后修改时间
+        String ifModifiedSince = req.headers().get(HttpHeaderNames.IF_MODIFIED_SINCE);
+        try {
+            //如果存在文件最后修改时间
+            if (StringUtils.isNotEmpty(ifModifiedSince)) {
+                //转化为时间戳并变为秒
+                long ifModifiedSinceDateSeconds = SDF_HTTP_DATE_FORMATTER.parse(ifModifiedSince).getTime();
+                //获取服务器静态文件最后修改时间
+                long fileLastModifiedSeconds = file.lastModified();
+                //如果相同
+                if (ifModifiedSinceDateSeconds == fileLastModifiedSeconds) {
+                    //浏览器不需要修改缓存静态文件
+                    notModified = true;
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("检测缓存文件是否修改出错:" + e);
+        } finally {
+            return notModified;
+        }
     }
 
     /**
@@ -366,53 +373,12 @@ public class DownloadFileHandler extends SimpleChannelInboundHandler<FullHttpReq
         return false;
     }
 
-    /**
-     * 从get请求中获取参数(过滤掉不需要的参数)
-     *
-     * @param httpRequest get请求
-     * @return
-     */
-    private static Map<String, Object> getParamsFromGet(FullHttpRequest httpRequest) {
-        //参数组
-        Map<String, Object> params = new HashMap<>();
-        //如果请求为GET继续
-        if (httpRequest.method() == HttpMethod.GET) {
-            //获取请求uri
-            String uri = httpRequest.uri();
-            //将Uri分割成path、参数组
-            QueryStringDecoder decoder = new QueryStringDecoder(uri);
-            //获取参数组
-            Map<String, List<String>> paramList = decoder.parameters();
-            //循环
-            for (Map.Entry<String, List<String>> entry : paramList.entrySet()) {
-                //直接组装
-                params.put(entry.getKey(), entry.getValue().get(0));
-            }
-        }
-        return params;
-    }
-
-    /**
-     * 异常抓取
-     *
-     * @param ctx
-     * @param cause
-     * @throws Exception
-     */
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        //输入日志
-        System.out.println("下载请求异常,连接断开,异常为:" + cause);
-        //当连接断开的时候 关闭未关闭的文件流
-        if (randomAccessFile != null) {
-            try {
-                randomAccessFile.close();
-            } catch (IOException e) {
-                //输入日志
-                System.out.println("下载请求关闭文件流异常:" + cause);
-            }
-        }
-        ctx.close();
+    protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest msg) throws Exception {
+        //获取get请求中的路径
+        String url = msg.uri();
+        //处理
+        handleResource(ctx, msg, url);
     }
 
 }
